@@ -35,7 +35,7 @@
   DEFAULT_VIEWPORT_LINE_JOIN = 'round';
   DEFAULT_CHECKBOX_VALUES = {
     perspective: { checked: true },
-    indices: { checked: false },
+    indices: { checked: true },
     edges: { checked: true }
   };
 
@@ -49,7 +49,8 @@
   function Shape(argv) {
     var self = this,
       vertices = argv[0],
-      edges = argv[1];
+      edges = argv[1],
+      labels = argv[2];
 
     // Rotations will always be relative to the original shape to avoid rounding errors.
     // This is a structure for caching the rotated vertices.
@@ -116,11 +117,41 @@
       return edges;
     };
 
+    self.getLabels = function() {
+      return labels;
+    };
+
     self.getRotations = function() {
       return rotations;
     };
 
+    self.getDistances = function(vertices, only_xy) {
+      // distances between all pairs of points
+      var interpoint_distances = [];
+      for (var i in vertices) {
+        for (var j in vertices) {
+          if (i < j) {
+            if (only_xy) {
+              // compute Euclidean distance based on x and y (since z and w are not visible in 2D projection)
+              var dist = Math.sqrt( Math.pow(vertices[i].x - vertices[j].x, 2) + Math.pow(vertices[i].y - vertices[j].y, 2) );
+            }
+            else {
+              // compute Euclidean distance based on x, y, z, and w
+              var dist = Math.sqrt( Math.pow(vertices[i].x - vertices[j].x, 2) + Math.pow(vertices[i].y - vertices[j].y, 2) + Math.pow(vertices[i].z - vertices[j].z, 2) + Math.pow(vertices[i].w - vertices[j].w, 2) );
+            }
+            interpoint_distances.push(dist);
+          }
+        }
+      }
+    // rescale the distances to be between 0 and 1
+    var min_dist = Math.min.apply(null, interpoint_distances);
+    var max_dist = Math.max.apply(null, interpoint_distances);
+    var interpoint_distances = interpoint_distances.map(function(x) { return (x - min_dist) / (max_dist - min_dist); });
+    return interpoint_distances;
+    };
+
     // This will copy the original shape and put a rotated version into rotatedVertices
+    // we also update the summary of the current projection
     self.rotate = function(axis, theta)  {
       addToRotation(axis, theta);
       applyRotations();
@@ -182,7 +213,11 @@
       shape = argv[0],
       canvas = argv[1],
       options = argv[2];
-
+    // compute the high-dimensional distances between all pairs of points
+    // TODO: make high-dimensional distances an initial parameter
+    // for now we just use the 4D distances to simulate high-dimensional distances
+    var hd_distances = shape.getDistances(shape.getVertices(), only_xy=false);
+    var hd_distances_sq = hd_distances.map(function(x) { return Math.pow(x, 2); });
     options = options || {};
 
     var scale = options.scale || DEFAULT_VIEWPORT_SCALE;
@@ -205,6 +240,7 @@
     self.draw = function() {
       var vertices = shape.getVertices();
       var edges = shape.getEdges();
+      var labels = shape.getLabels();
 
       context.clearRect(0, 0, canvas.width, canvas.height);
       var adjusted = [];
@@ -248,9 +284,80 @@
 
       if (checkboxes.indices.checked) {
         for (var i in adjusted) {
-          context.fillText(i.toString(), adjusted[i].x, adjusted[i].y);
+          // draw a circle around the point
+          // let w determine the radius, and z the alpha
+          context.beginPath();
+          if (checkboxes.wsize.checked) {
+            var radius = 2 + 2 * adjusted[i].w / 255;
+          }
+          else {
+            var radius = 3;
+          }
+          context.arc(adjusted[i].x, adjusted[i].y, radius, 0, 2 * Math.PI, false);
+          // fill the circle with the color of the point
+          var label = labels[i];
+          // colors are seaborn colorblind palette
+          var colors = [
+            {'r': 1, 'g': 115, 'b': 178},
+            {'r': 222, 'g': 143, 'b': 5},
+            {'r': 2, 'g': 158, 'b': 115},
+            {'r': 213, 'g': 94, 'b': 0},
+            {'r': 204, 'g': 120, 'b': 188},
+            {'r': 202, 'g': 145, 'b': 97},
+            {'r': 251, 'g': 175, 'b': 228},
+            {'r': 148, 'g': 148, 'b': 148},
+            {'r': 236, 'g': 225, 'b': 51},
+            {'r': 86, 'g': 180, 'b': 233}
+          ];
+          var color = colors[label % colors.length];
+          if (checkboxes.zalpha.checked) {
+            var alpha = adjusted[i].z;
+          }
+          else {
+            var alpha = 1;
+          }
+          context.fillStyle = 'rgba(' + color.r + ',' + color.g + ',' + color.b + ',' + alpha + ')';
+          context.fill();
+          context.closePath();
+          //context.fillText(i.toString(), adjusted[i].x, adjusted[i].y);
         }
       }
+
+      // draw a legend for the indices
+      var uniqueLabels = [];
+      for (var i in labels) {
+        if (uniqueLabels.indexOf(labels[i]) == -1) {
+          uniqueLabels.push(labels[i]);
+        }
+      }
+      for (var i in uniqueLabels) {	
+        var color = colors[uniqueLabels[i] % colors.length];
+        context.fillStyle = 'rgba(' + color.r + ',' + color.g + ',' + color.b + ',1)';
+        // make the text a bit bigger
+        context.font = 'italic 16px sans-serif';
+        context.fillText(uniqueLabels[i].toString(), 460, 10 + 16 * i);
+      }
+
+      if (checkboxes.livesummary.checked) {
+        var summary = self.summarize();
+        // draw the summary
+        context.font = 'italic 16px sans-serif';
+        context.fillStyle = 'rgba(0,0,0,1)';
+        context.fillText(summary, 10, 10);
+      }
+    };
+
+    self.summarize = function() {
+      var vertices = shape.getVertices();
+      var interpoint_distances = shape.getDistances(vertices, only_xy=true);
+      // compute the stress by comparing the high-dimensional distances to the 2D distances
+      // stress = (sum_i (d_i - d'_i)^2) / (sum_i d_i^2)
+      var stress = 0;
+      for (var i in hd_distances) {
+        stress += Math.pow(hd_distances[i] - interpoint_distances[i], 2);
+      }
+      stress = stress / hd_distances_sq.reduce((partialSum, a) => partialSum + a, 0);
+      return 'Stress: ' + stress.toFixed(2);
     };
 
     canvas.onmousedown = function(e) { 
@@ -291,6 +398,13 @@
 
     document.onmouseup = function() {
       clicked = false;
+      if (!checkboxes.livesummary.checked) {
+        var summary = self.summarize();
+        // draw the summary
+        context.font = 'italic 16px sans-serif';
+        context.fillStyle = 'rgba(0,0,0,1)';
+        context.fillText(summary, 10, 10);
+      }
     };
 
     checkboxes.onchange = function() {

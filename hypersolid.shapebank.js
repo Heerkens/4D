@@ -41,7 +41,66 @@
                         [12, 13], [12, 14],
                                   [13, 15],
                                   [14, 15]
-  ]);
+  ],
+  []);
+
+  // Random 4D points
+  Hypersolid.RandomPoints = function() {
+    return new RandomPoints();
+  };
+  function RandomPoints() {};
+  RandomPoints.prototype = Hypersolid.Shape(generateRandomPoints(), [], []);
+
+  function generateRandomPoint() {
+    return {
+      x: Math.random() * 2 - 1,
+      y: Math.random() * 2 - 1,
+      z: Math.random() * 2 - 1,
+      w: Math.random() * 2 - 1
+    };
+  }
+
+  function generateRandomPoints() {
+    var points = [];
+    for (var i = 0; i < 50; i++) {
+      points.push(generateRandomPoint());
+    }
+    return points;
+  }
+
+  // Random clustered 4D points with labels
+  Hypersolid.ClusteredPoints = function() {
+    return new ClusteredPoints();
+  };
+  function ClusteredPoints() {};
+  var clusteredPoints = generateClusteredPoints();
+  ClusteredPoints.prototype = Hypersolid.Shape(clusteredPoints.points, [], clusteredPoints.labels);
+
+  function generateClusteredPoints() {
+    var points = [];
+    var labels = [];
+    for (var i = 0; i < 5; i++) {
+      var center = generateRandomPoint();
+      for (var j = 0; j < 20; j++) {
+        points.push(generateRandomPointAroundCenter(center));
+        labels.push(i);
+      }
+    }
+    return {
+      points: points,
+      labels: labels
+    };
+  }
+  
+  function generateRandomPointAroundCenter(center) {
+    // center is a 4D point, label is the class number (0-9)
+    return {
+      x: center.x + (Math.random() - 0.5) / 2,
+      y: center.y + (Math.random() - 0.5) / 2,
+      z: center.z + (Math.random() - 0.5) / 2,
+      w: center.w + (Math.random() - 0.5) / 2,
+    };
+  }
 
   // 5 cell
   Hypersolid.Simplex = function() {
